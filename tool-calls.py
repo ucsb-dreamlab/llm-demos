@@ -25,8 +25,9 @@ def _():
     import marimo as mo
     import requests
     import os
+    import json
 
-    return mo, requests
+    return json, mo, os, requests
 
 
 @app.cell(hide_code=True)
@@ -40,17 +41,18 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    api_base_url = mo.ui.text(value="https://litellm.dreamlab.ucsb.edu/v1", 
-                              label="API Base URL", 
-                              full_width=True)
-    model_name = mo.ui.text(value="gemini-3-flash-preview", 
-                            label="Model Name", 
-                            full_width= True)
-    api_key = mo.ui.text(label="API Key (required)", 
-                         kind="password", 
-                         full_width=True)
-    mo.vstack([api_base_url, model_name, api_key])
+def _(mo, os):
+    # set API base url, model, and api key
+    default_base_url = "https://litellm.dreamlab.ucsb.edu"
+    default_model = "gemini-3-flash-preview"
+    api_base_url = os.getenv("LLM_API_BASE_URL") or default_base_url
+    model_name = os.getenv("LLM_API_MODEL") or default_model
+    api_key = os.getenv("LLM_API_KEY")
+    mo.md(
+        "**Configuration**:\n"
+        + f"- API Base URL (`api_base_url`): {api_base_url}\n"
+        + f"- Model Name (`model_name`): {model_name}"
+    )
     return api_base_url, api_key, model_name
 
 
@@ -59,36 +61,38 @@ def _(mo):
     mo.md(r"""
     ## A simple LLM request
 
-    First, we'll define a python function (`call_llm`) that uses an http client library (`requests`) to call the Open AI-compatible endpoint. The function takes a `prompt` and an optional list of `tool` definitions as arguments. It uses the base url, model name, and API key set in the input above. Note the structure of the `data` object in this function: `model` and `messages` are required by the chat completions API. We'll talk more about `tools` below.
+    First, we'll define a python function (`call_llm`) that uses an http client library (`requests`) to call the Open AI-compatible API. The function takes a single argument, the prompt to send to the llm. It uses a pre-configured API base url, model name, and API key. Note the structure of the `data` object in this function: `model` and `messages` are required by the chat completions API.
     """)
     return
 
 
 @app.cell
 def _(api_base_url, api_key, model_name, requests):
-    def call_llm(prompt_or_messages, tools = []):
-        request_url = f"{api_base_url.value}/chat/completions"
+    def call_llm(prompt):
+        # URL for the chat completions API endpoint:
+        request_url = f"{api_base_url}/v1/chat/completions"
 
-        # http headers is where we set our api key
+        # http headers is where we set our api key and
         headers = {
-            "Authorization": f"Bearer {api_key.value}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
 
-        if isinstance(prompt_or_messages, str):
-            messages = [{"role": "user", "content": prompt_or_messages}]
-        else:
-            messages = prompt_or_messages
-
         # the request includes the model name and the prompt.
         data = {
-            "model": model_name.value,
-            "messages": messages,
-            "tools": tools
+            "model": model_name,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
         }
 
-        # run the request
-        return requests.post(request_url, headers=headers, json=data, timeout=60)
+        # return the json response of the request
+        return requests.post(
+            request_url,
+            headers=headers,
+            json=data,
+            timeout=60
+        ).json()
 
 
     return (call_llm,)
@@ -97,34 +101,62 @@ def _(api_base_url, api_key, model_name, requests):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Let's call the function with a question about the whether in Paris. The response is a json data structure with message content.
+    Let's call the function with a question about the whether in Paris. The response is a json data structure with the llm's output (and lots of other information we can mostly ignore).
     """)
     return
 
 
 @app.cell
-def _(call_llm, mo):
-    response = call_llm("what is the weather like in Paris?")
-    content = response.json()["choices"][0]["message"]["content"]
-    mo.md(content) #render the content as markdown below
+def _(call_llm):
+    paris_weather_response = call_llm("what is the weather in Paris?")
+    paris_weather_response
+    return (paris_weather_response,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The part of the response we really want `paris_weather_response["choices"][0]["message"]`. This is the LLM's message back to us, responding to the prompt.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(paris_weather_response):
+    paris_weather_response["choices"][0]["message"]
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The response above is likely wrong. The model doesn't actually know what the current whether in Paris is, so it's "halucinates" a (convincing) answer.
+    Here is the message content rendered as markdown:
+    """)
+    return
 
-    ## Add a Tool Definition
 
-    To avoid this hallucination, we can add a tool definition to our response. Tool definitions give the LLM additional ways to answer questions they encounter when responding to the prompt. We'll define a `get_weather` tool and included it in our request. In the models response, it may invoke the tool with specific arguments. Let's see how this works.
+@app.cell(hide_code=True)
+def _(mo, paris_weather_response):
+    mo.md(paris_weather_response["choices"][0]["message"]["content"])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    This description of the weather in Paris is likely wrong. The model doesn't actually know what the current conditions are in Paris, so it makes up (or "hallucinates") a convicning reply.
+
+    ## Use 'Tools' to Avoid Hallucinations
+
+    One way to avoid hallucinations in LLM responses is by providing the model with "tools" that it can use. Tool definitions give the LLMs additional ways to answer questions or perform tasks in responding to the prompt. To illustrate, we'll define a `get_weather` tool and included it in our request. In the models response, it may invoke the tool with specific arguments. Let's see how this works.
     """)
     return
 
 
 @app.cell
 def _():
-    # get_weather_tool is a tool definition that is included in our LLM API request
+    # get_weather_tool is a tool definition to include in our API request.
+    # The tool defines a function (get_weather) that takes one argument.
     get_weather_tool = {
         "type": "function",
         "function": {
@@ -136,10 +168,6 @@ def _():
                     "location": {
                         "type": "string",
                         "description": "A place name (e.g., Paris)"
-                    },
-                    "unit": {
-                        "type": "string",
-                        "enum": ["celsius", "fahrenheit"]
                     }
                 },
                 "required": ["location"]
@@ -149,12 +177,78 @@ def _():
     return (get_weather_tool,)
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We also need to revise our previous `call_llm` function to include the tool definition in the request.
+    """)
+    return
+
+
 @app.cell
-def _(call_llm, get_weather_tool):
-    # The LLM's response now includes a "tool call" to the get_weather tool
-    prompt = "what is the weather like in Paris?"
-    tool_response = call_llm(prompt, tools = [get_weather_tool])
-    tool_response.json()["choices"][0]["message"]["tool_calls"][0]["function"]
+def _(api_base_url, api_key, model_name, requests):
+    def call_llm_with_tool(prompt, tools = []):
+        request_url = f"{api_base_url}/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": model_name,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "tools": tools # Include tool definitions in the request!
+        }
+        return requests.post(
+            request_url,
+            headers=headers,
+            json=data,
+            timeout=60
+        ).json()
+
+    return (call_llm_with_tool,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Let's see how the LLM response changes with the `get_weather` tool definition included in the request.
+    """)
+    return
+
+
+@app.cell
+def _(call_llm_with_tool, get_weather_tool):
+    paris_weather_toolcall = call_llm_with_tool(
+        "what is the weather in Paris?",
+        tools = [get_weather_tool]
+    )
+    paris_weather_toolcall["choices"][0]["message"]
+    return (paris_weather_toolcall,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The structure of the response `message` has changed. The (hallucinated) `content` is gone. It has been replaced with a list of `tool_calls`. Let's take a closer look at the first tool call in the list, and specifically, its `function` block.
+    """)
+    return
+
+
+@app.cell
+def _(paris_weather_toolcall):
+    paris_weather_toolcall["choices"][0]["message"]["tool_calls"][0]["function"]
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The `tool_calls` block includes the names and arguments for functions we defined in the tool definitions. The expectation is that we will run these tools ourselve: the output from `get_weather("Paris")` is used as additional context for grounding the LLM's response.
+
+    Our `get_weather_tool` is just a tool *definition*, which is included in our request. We have yet to implement the `get_weather` function so we can run it. Let's do that next.
+    """)
     return
 
 
@@ -163,16 +257,16 @@ def _(mo):
     mo.md("""
     ## Implement get_weather
 
-    Here we implement a Python function that gets the current weather for a location.
+    Here is a simple implementation of the `get_weather` function that uses the https://wttr.in API.
     """)
     return
 
 
 @app.cell
 def _(requests):
-    def get_weather(location: str, unit: str = "celsius") -> str:
+    def get_weather(location: str) -> str:
         # A simple implementation using wttr.in
-        url = f"https://wttr.in/{location}?format=%C+%t"
+        url = f"https://wttr.in/{location}"
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
@@ -187,59 +281,73 @@ def _(requests):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    ## Using the tool call
+    ## Running the tool calls
 
-    Now we create an `agent_loop` function that takes a prompt and tools. It checks if the model wants to call a tool, runs it if so, and sends the result back to get the final answer.
+    For the LLM to use the output from the tool call, we need run the tool and send a new request with the additional context. To do this, let's once again revise our function for calling the llm.
     """)
     return
 
 
 @app.cell
-def _(call_llm, get_weather):
-    import json
-    def agent_loop(prompt, tools=[]):
-        messages = [{"role": "user", "content": prompt}]
+def _(
+    api_base_url,
+    api_key,
+    get_weather,
+    get_weather_tool,
+    json,
+    mo,
+    model_name,
+    requests,
+):
+    def call_llm_with_context(messages = [], tools = []):
+        request_url = f"{api_base_url}/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": model_name,
+            "messages": messages,
+            "tools": tools
+        }
+        resp = requests.post(
+            request_url,
+            headers=headers,
+            json=data,
+            timeout=60
+        ).json()
+        return resp["choices"][0]["message"]
+
+
+
+    # messages is our full context. Initially, just the user prompt
+    messages = [
+        {"role": "user", "content": "What is the weather in Paris?"}
+    ]
+
+    # initial response with tool calls
+    msg1 = call_llm_with_context(messages,[get_weather_tool])
+
+    # add llm's initial response to the context
+    messages.append(msg1)
+
+    # run tool_calls and add output to context
+    for call in msg1["tool_calls"]:
+        args = json.loads(call["function"]["arguments"])
+        name = call["function"]["name"]
+        if name == "get_weather":
+            weather = get_weather(args["location"])
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call["id"],
+                "content": weather
+            })
     
-        response = call_llm(messages, tools=tools).json()
-    
-        # Extract the assistant's message
-        message = response["choices"][0]["message"]
-        messages.append(message)
-    
-        # Check if the model decided to call any tools
-        if "tool_calls" in message and message["tool_calls"]:
-            for tool_call in message["tool_calls"]:
-                if tool_call["function"]["name"] == "get_weather":
-                    # Parse arguments
-                    args = json.loads(tool_call["function"]["arguments"])
-                    location = args.get("location")
-                
-                    # Call our actual Python function
-                    weather_result = get_weather(location)
-                
-                    # Append the tool's response to the message history
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "name": "get_weather",
-                        "content": weather_result
-                    })
-        
-            # Second LLM call with the tool results included
-            second_response = call_llm(messages, tools=tools).json()
-            return second_response["choices"][0]["message"]["content"]
-        else:
-            # If no tools were called, just return the initial response
-            return message["content"]
+    # llm request with initial response + tool call output
+    msg2 = call_llm_with_context(messages, tools = [get_weather_tool])
 
-
-    return (agent_loop,)
-
-
-@app.cell(hide_code=True)
-def _(agent_loop, get_weather_tool, mo):
-    agent_response = agent_loop("What is the weather like in Paris?", tools=[get_weather_tool])
-    mo.md(f"**Final Agent Response:** {agent_response}")
+    # show the final response
+    mo.md(msg2["content"])
     return
 
 
