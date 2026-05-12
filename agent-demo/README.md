@@ -1,6 +1,6 @@
 ## `agent.py`
 
-`agent.py` is a Python script that demonstrates the basic, essential features of an AI agent:
+`agent.py` is a Python script that demonstrates the basic features of an AI agent:
 
 - **Agent Loop**: A loop where the agent receives a prompt, calls the LLM, processes the response (including requested tool calls), executes the tools, and feeds the results back to the LLM until the task is complete (i.e., no more tool calls).
 - **Tool Calling**: The ability to provide the LLM with a schema of available functions (tools) it can use. In this example, the agent has two tools:
