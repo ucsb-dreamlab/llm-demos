@@ -75,25 +75,14 @@ def _(api_base_url, api_key, model_name, requests):
         # http headers is where we set our api key and
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         # the request includes the model name and the prompt.
-        data = {
-            "model": model_name,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
-        }
+        data = {"model": model_name, "messages": [{"role": "user", "content": prompt}]}
 
         # return the json response of the request
-        return requests.post(
-            request_url,
-            headers=headers,
-            json=data,
-            timeout=60
-        ).json()
-
+        return requests.post(request_url, headers=headers, json=data, timeout=60).json()
 
     return (call_llm,)
 
@@ -167,12 +156,12 @@ def _():
                 "properties": {
                     "location": {
                         "type": "string",
-                        "description": "A place name (e.g., Paris)"
+                        "description": "A place name (e.g., Paris)",
                     }
                 },
-                "required": ["location"]
-            }
-        }
+                "required": ["location"],
+            },
+        },
     }
     return (get_weather_tool,)
 
@@ -187,25 +176,18 @@ def _(mo):
 
 @app.cell
 def _(api_base_url, api_key, model_name, requests):
-    def call_llm_with_tool(prompt, tools = []):
+    def call_llm_with_tool(prompt, tools=[]):
         request_url = f"{api_base_url}/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         data = {
             "model": model_name,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "tools": tools # Include tool definitions in the request!
+            "messages": [{"role": "user", "content": prompt}],
+            "tools": tools,  # Include tool definitions in the request!
         }
-        return requests.post(
-            request_url,
-            headers=headers,
-            json=data,
-            timeout=60
-        ).json()
+        return requests.post(request_url, headers=headers, json=data, timeout=60).json()
 
     return (call_llm_with_tool,)
 
@@ -221,8 +203,7 @@ def _(mo):
 @app.cell
 def _(call_llm_with_tool, get_weather_tool):
     paris_weather_toolcall = call_llm_with_tool(
-        "what is the weather in Paris?",
-        tools = [get_weather_tool]
+        "what is the weather in Paris?", tools=[get_weather_tool]
     )
     paris_weather_toolcall["choices"][0]["message"]
     return (paris_weather_toolcall,)
@@ -274,7 +255,6 @@ def _(requests):
         except Exception as e:
             return f"Could not get weather for {location}: {e}"
 
-
     return (get_weather,)
 
 
@@ -299,34 +279,21 @@ def _(
     model_name,
     requests,
 ):
-    def call_llm_with_context(messages = [], tools = []):
+    def call_llm_with_context(messages=[], tools=[]):
         request_url = f"{api_base_url}/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-        data = {
-            "model": model_name,
-            "messages": messages,
-            "tools": tools
-        }
-        resp = requests.post(
-            request_url,
-            headers=headers,
-            json=data,
-            timeout=60
-        ).json()
+        data = {"model": model_name, "messages": messages, "tools": tools}
+        resp = requests.post(request_url, headers=headers, json=data, timeout=60).json()
         return resp["choices"][0]["message"]
 
-
-
     # messages is our full context. Initially, just the user prompt
-    messages = [
-        {"role": "user", "content": "What is the weather in Paris?"}
-    ]
+    messages = [{"role": "user", "content": "What is the weather in Paris?"}]
 
     # initial response with tool calls
-    msg1 = call_llm_with_context(messages,[get_weather_tool])
+    msg1 = call_llm_with_context(messages, [get_weather_tool])
 
     # add llm's initial response to the context
     messages.append(msg1)
@@ -337,14 +304,12 @@ def _(
         name = call["function"]["name"]
         if name == "get_weather":
             weather = get_weather(args["location"])
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call["id"],
-                "content": weather
-            })
-    
+            messages.append(
+                {"role": "tool", "tool_call_id": call["id"], "content": weather}
+            )
+
     # llm request with initial response + tool call output
-    msg2 = call_llm_with_context(messages, tools = [get_weather_tool])
+    msg2 = call_llm_with_context(messages, tools=[get_weather_tool])
 
     # show the final response
     mo.md(msg2["content"])
